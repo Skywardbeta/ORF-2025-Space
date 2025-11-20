@@ -1,42 +1,76 @@
 package gateway
 
 import (
-	"log"
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"time"
 
-	"github.com/robfig/cron/v3"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/model"
-	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/utils"
 )
 
 type BpGateway struct {
-	Host string `json:"host"`
-	Port int    `json:"port"`
-	cron *cron.Cron
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	client *http.Client
 }
 
-func NewBpGateway(host string, port int, cron *cron.Cron) *BpGateway {
+func NewBpGateway(host string, port int, timeout time.Duration) *BpGateway {
 	return &BpGateway{
 		Host: host,
 		Port: port,
-		cron: cron,
+		client: &http.Client{
+			Timeout: timeout,
+		},
 	}
 }
 
-func (g *BpGateway) ProxyRequest(req *model.BpRequest) (*model.BpResponse, error) {
-	g.cron.Start()
-	log.Println("バッチ処理スケジューラーを開始しました")
+func (g *BpGateway) ProxyRequest(ctx context.Context, breq *model.BpRequest) (*model.BpResponse, error) {
+	// breq.URLは既にhandler層で検証済みなので、ParseURL()はエラーにならない
+	parsedURL, _ := breq.ParseURL()
 
-	// pages/default.txtからHTMLを読み込む
-	htmlBytes, err := utils.LoadDefaultPage()
+	// 転送先URLを構築
+	targetURL := _buildTargetURL(g.Host, g.Port, parsedURL)
+
+	// HTTPリクエストを作成（contextを設定）
+	httpReq, err := http.NewRequestWithContext(ctx, breq.Method, targetURL, bytes.NewReader(breq.Body))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
+	breq.SetHeaders(httpReq)
+
+	// HTTPリクエストを送信
+	httpResp, err := g.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to forward HTTP request: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	// レスポンスボディを読み込む
+	bodyBytes, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	// BpResponseを作成
 	return &model.BpResponse{
-		StatusCode:    200,
-		Headers:       req.Headers,
-		Body:          htmlBytes,
-		ContentType:   "text/html; charset=utf-8",
-		ContentLength: int64(len(htmlBytes)),
+		StatusCode:    httpResp.StatusCode,
+		Headers:       httpResp.Header,
+		Body:          bodyBytes,
+		ContentType:   httpResp.Header.Get("Content-Type"),
+		ContentLength: httpResp.ContentLength,
 	}, nil
+}
+
+// buildTargetURL 指定されたホストとポート、パース済みURLから転送先URLを構築する
+func _buildTargetURL(host string, port int, parsedURL *url.URL) string {
+	targetURL := fmt.Sprintf("http://%s:%d%s", host, port, parsedURL.Path)
+	if parsedURL.RawQuery != "" {
+		targetURL += "?" + parsedURL.RawQuery
+	}
+	return targetURL
 }
