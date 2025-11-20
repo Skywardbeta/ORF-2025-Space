@@ -49,8 +49,8 @@ func (br *BpRequest) ValidateURL() error {
 	return nil
 }
 
-// GetBodyReader リクエストボディをio.Readerとして返す
-func (br *BpRequest) GetBodyReader() io.Reader {
+// GetBodyReader リクエストボディをio.ReadCloserとして返す
+func (br *BpRequest) GetBodyReader() io.ReadCloser {
 	if len(br.Body) == 0 {
 		return nil
 	}
