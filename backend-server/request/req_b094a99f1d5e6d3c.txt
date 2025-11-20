@@ -1,0 +1,1 @@
+{"request_id":"b094a99f1d5e6d3c","method":"GET","url":"https://www.itmedia.co.jp/aiplus/articles/2511/19/news067.html","headers":{"Accept":["*/*"],"User-Agent":["curl/7.81.0"]},"body":""}

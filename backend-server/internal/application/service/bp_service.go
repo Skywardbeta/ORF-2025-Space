@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/gateway"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/repository"
@@ -20,10 +21,53 @@ func NewBpService(
 	bpgateway gateway.BpGateway,
 	bprepository repository.BpRepository,
 ) *BpService {
-	return &BpService{
+	s := &BpService{
 		bpgateway:    bpgateway,
 		bprepository: bprepository,
 	}
+	s.StartPushListener()
+	return s
+}
+
+// StartPushListener Push受信したレスポンスを監視してキャッシュに保存する
+func (bs *BpService) StartPushListener() {
+	go func() {
+		ch := bs.bpgateway.GetUnsolicitedResponseCh()
+		for resp := range ch {
+			log.Printf("[BpService] Push受信: ステータス=%d", resp.StatusCode)
+
+			// URLを復元するロジックが必要
+			// 現在の実装では、レスポンス自体にURLが含まれていないため、
+			// リモート側がヘッダーに "X-Original-URL" を含めていることを期待する。
+			// (ユーザー提供のコードでは bpRes.Headers["X-Original-URL"] = []string{targetURL} となっている)
+
+			urls, ok := resp.Headers["X-Original-URL"]
+			if !ok || len(urls) == 0 {
+				log.Printf("[BpService] Push受信エラー: X-Original-URL ヘッダーがありません。キャッシュできません。")
+				continue
+			}
+			originalURL := urls[0]
+
+			// ダミーのBpRequestを作成（キャッシュキー生成用）
+			req := &model.BpRequest{
+				Method: "GET", // Pushは基本的にGETの結果と仮定
+				URL:    originalURL,
+			}
+
+			// キャッシュに保存
+			// TTLはデフォルト値を使用（configから取るべきだが、ここでは簡易的に24時間とする）
+			// 理想的にはConfigをServiceに注入する
+			ttl := 24 * time.Hour
+			ctx := context.Background()
+
+			err := bs.bprepository.SetResponseWithURL(ctx, req, resp, ttl)
+			if err != nil {
+				log.Printf("[BpService] Pushキャッシュ保存エラー: %v (URL=%s)", err, originalURL)
+			} else {
+				log.Printf("[BpService] Pushキャッシュ保存成功: URL=%s", originalURL)
+			}
+		}
+	}()
 }
 
 // ProxyRequest HTTPリクエストを転送する（キャッシュ可能な場合はキャッシュもチェック）

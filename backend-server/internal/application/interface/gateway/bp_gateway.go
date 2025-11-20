@@ -11,4 +11,7 @@ type BpGateway interface {
 	// ProxyRequest HTTPリクエストを転送先に送信する
 	// ctx: コンテキスト（リクエストのキャンセレーションやタイムアウト制御に使用）
 	ProxyRequest(ctx context.Context, req *model.BpRequest) (*model.BpResponse, error)
+
+	// GetUnsolicitedResponseCh Push受信したレスポンスを受け取るチャンネルを返す
+	GetUnsolicitedResponseCh() <-chan *model.BpResponse
 }

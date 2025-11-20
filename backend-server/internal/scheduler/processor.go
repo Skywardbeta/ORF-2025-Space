@@ -54,6 +54,7 @@ func (rp *RequestProcessor) worker(ctx context.Context, id int) {
 	defer log.Printf("[Worker %d] 終了しました", id)
 
 	for req := range rp.jobQueue {
+		log.Printf("[Worker %d] ジョブキューからリクエストを受信: %s", id, req.URL)
 		// プラグイン可能なハンドラーを使用
 		if err := rp.reqhandler.HandleRequest(ctx, req, id); err != nil {
 			log.Printf("[Worker %d] リクエスト処理エラー (URL: %s): %v", id, req.URL, err)

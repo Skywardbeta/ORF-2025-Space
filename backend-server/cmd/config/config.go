@@ -47,7 +47,7 @@ func LoadConfig() Config {
 		BPGateway: BpGateway{
 			Host:    "localhost",
 			Port:    8081,
-			Timeout: 180 * time.Second,
+			Timeout: 5 * time.Second,
 		},
 		RedisClient: Redis{
 			Host:     "localhost",
@@ -61,8 +61,8 @@ func LoadConfig() Config {
 			CleanupInterval: 5 * time.Minute,
 		},
 		Worker: WorkerConfig{
-			Workers:           5,
-			QueueWatchTimeout: 5 * time.Second,
+			Workers:           10,
+			QueueWatchTimeout: 10 * time.Second,
 		},
 		Middlware: MiddlewareConfig{
 			CertPath:      "./bump.crt",

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/repository"
@@ -29,6 +30,9 @@ func (qw *QueueWatcher) WatchQueue(ctx context.Context) (*model.BpRequest, error
 	req, err := qw.bprepo.BLPopReservedRequest(ctx, qw.timeout)
 	if err != nil {
 		return nil, err
+	}
+	if req != nil {
+		log.Printf("[QueueWatcher] Redisからジョブを取得: %s", req.URL)
 	}
 	return req, nil
 }

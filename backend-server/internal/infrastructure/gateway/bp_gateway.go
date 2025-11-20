@@ -39,18 +39,28 @@ type DTNJsonResponse struct {
 }
 
 type BpGateway struct {
-	Host        string   `json:"host"`
-	Port        int      `json:"port"`
-	responseChs sync.Map // map[string]chan *DTNJsonResponse
+	Host        string        `json:"host"`
+	Port        int           `json:"port"`
+	Timeout     time.Duration // 追加
+	responseChs sync.Map      // map[string]chan *DTNJsonResponse
+
+	// Push受信したレスポンスを通知するチャンネル（Service層が監視する）
+	UnsolicitedResponseCh chan *model.BpResponse
 }
 
 func NewBpGateway(host string, port int, timeout time.Duration) *BpGateway {
 	g := &BpGateway{
-		Host: host,
-		Port: port,
+		Host:                  host,
+		Port:                  port,
+		Timeout:               timeout,                           // 追加
+		UnsolicitedResponseCh: make(chan *model.BpResponse, 100), // バッファを持たせる
 	}
 	g.StartReceiver()
 	return g
+}
+
+func (g *BpGateway) GetUnsolicitedResponseCh() <-chan *model.BpResponse {
+	return g.UnsolicitedResponseCh
 }
 
 func (g *BpGateway) StartReceiver() {
@@ -88,6 +98,8 @@ func (g *BpGateway) StartReceiver() {
 				continue
 			}
 
+			log.Printf("[Receiver] Received content: %s", string(fileContent))
+
 			// 処理後は即削除
 			_ = os.Remove(targetFile)
 
@@ -108,7 +120,21 @@ func (g *BpGateway) StartReceiver() {
 					log.Printf("[Receiver] Channel blocked or closed for ID: %s", dtnResp.RequestID)
 				}
 			} else {
-				log.Printf("[Receiver] No waiting channel found for ID: %s", dtnResp.RequestID)
+				log.Printf("[Receiver] No waiting channel found for ID: %s. Treating as unsolicited push.", dtnResp.RequestID)
+				// 待ち受け先がない場合は、Push通知として処理する（Service層へ通知）
+				// BpResponseに変換して送る
+				bpResp, err := convertToBpResponse(&dtnResp)
+				if err != nil {
+					log.Printf("[Receiver] Failed to convert push response: %v", err)
+					continue
+				}
+
+				select {
+				case g.UnsolicitedResponseCh <- bpResp:
+					log.Printf("[Receiver] Dispatched unsolicited response to service layer")
+				default:
+					log.Printf("[Receiver] Unsolicited response channel full, dropping response")
+				}
 			}
 		}
 	}()
@@ -130,31 +156,12 @@ func (g *BpGateway) ProxyRequest(ctx context.Context, breq *model.BpRequest) (*m
 	}
 
 	// レスポンス待機
+	ctx, cancel := context.WithTimeout(ctx, g.Timeout)
+	defer cancel()
+
 	select {
 	case dtnResp := <-respCh:
-		// DTNJsonResponse -> http.Response -> model.BpResponse 変換
-
-		// Body (Base64) のデコード
-		decodedBodyBytes, err := base64.StdEncoding.DecodeString(dtnResp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding base64 body: %v", err)
-		}
-
-		// ヘッダーの構築
-		httpHeader := make(http.Header)
-		for k, v := range dtnResp.Headers {
-			for _, hVal := range v {
-				httpHeader.Add(k, hVal)
-			}
-		}
-
-		return &model.BpResponse{
-			StatusCode:    dtnResp.StatusCode,
-			Headers:       httpHeader,
-			Body:          decodedBodyBytes,
-			ContentType:   dtnResp.ContentType,
-			ContentLength: dtnResp.ContentLength,
-		}, nil
+		return convertToBpResponse(dtnResp)
 
 	case <-ctx.Done():
 		return nil, fmt.Errorf("request timed out or cancelled: %w", ctx.Err())
@@ -216,4 +223,29 @@ func generateID() string {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// convertToBpResponse converts DTNJsonResponse to model.BpResponse
+func convertToBpResponse(dtnResp *DTNJsonResponse) (*model.BpResponse, error) {
+	// Body (Base64) のデコード
+	decodedBodyBytes, err := base64.StdEncoding.DecodeString(dtnResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding base64 body: %v", err)
+	}
+
+	// ヘッダーの構築
+	httpHeader := make(http.Header)
+	for k, v := range dtnResp.Headers {
+		for _, hVal := range v {
+			httpHeader.Add(k, hVal)
+		}
+	}
+
+	return &model.BpResponse{
+		StatusCode:    dtnResp.StatusCode,
+		Headers:       httpHeader,
+		Body:          decodedBodyBytes,
+		ContentType:   dtnResp.ContentType,
+		ContentLength: dtnResp.ContentLength,
+	}, nil
 }
