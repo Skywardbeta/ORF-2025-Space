@@ -3,9 +3,18 @@ package config
 import "time"
 
 type BpGateway struct {
-	Host    string
-	Port    int
-	Timeout time.Duration // HTTPクライアントのタイムアウト
+	TransportMode string
+	Host          string
+	Port          int
+	Timeout       time.Duration
+	BpSocket      BpSocketConfig
+}
+
+type BpSocketConfig struct {
+	LocalNodeNum     uint64
+	LocalServiceNum  uint64
+	RemoteNodeNum    uint64
+	RemoteServiceNum uint64
 }
 
 type Redis struct {
@@ -21,20 +30,20 @@ type RedisKeys struct {
 }
 
 type CacheConfig struct {
-	Dir             string        // キャッシュファイルを保存するディレクトリ
-	DefaultTTL      time.Duration // デフォルトのキャッシュTTL
-	CleanupInterval time.Duration // キャッシュクリーンアップの実行間隔
+	Dir             string
+	DefaultTTL      time.Duration
+	CleanupInterval time.Duration
 }
 
 type WorkerConfig struct {
-	Workers           int           // Worker Poolのワーカー数
-	QueueWatchTimeout time.Duration // キュー監視のタイムアウト
+	Workers           int
+	QueueWatchTimeout time.Duration
 }
 
 type MiddlewareConfig struct {
-	CertPath      string // ルート証明書のパス
-	KeyPath       string // ルート秘密鍵のパス
-	MaxCacheSize  int    // 証明書キャッシュの最大数
-	RSABits       int    // RSA鍵のビット長
-	CacheDuration int    // 生成した証明書の有効期間(時間)
+	CertPath      string
+	KeyPath       string
+	MaxCacheSize  int
+	RSABits       int
+	CacheDuration int
 }

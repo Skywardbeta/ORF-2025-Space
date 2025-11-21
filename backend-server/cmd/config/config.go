@@ -14,9 +14,16 @@ type Config struct {
 func LoadConfig() Config {
 	return Config{
 		BPGateway: BpGateway{
-			Host:    "localhost",
-			Port:    8081,
-			Timeout: 5 * time.Second,
+			TransportMode: "ion_cli", // "ion_cli" or "bp_socket"
+			Host:          "localhost",
+			Port:          8081,
+			Timeout:       5 * time.Second,
+			BpSocket: BpSocketConfig{
+				LocalNodeNum:     149,
+				LocalServiceNum:  1,
+				RemoteNodeNum:    150,
+				RemoteServiceNum: 1,
+			},
 		},
 		RedisClient: Redis{
 			Host:     "localhost",
