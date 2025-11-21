@@ -1,0 +1,18 @@
+# Binaries
+*.exe
+backend-server
+app
+*.test
+
+# Temporary files
+*.txt
+!pages/*.txt
+
+# Build artifacts
+/request/
+/tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+

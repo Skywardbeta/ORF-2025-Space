@@ -12,6 +12,7 @@ import (
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/service"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/handlers"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/gateway"
+	gateway2 "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/gateway"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository/plugins"
 	scheduler_worker "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/worker"
@@ -38,9 +39,33 @@ func main() {
 	}
 	repoClient := plugins.NewRedisClient(redisClient, redisConfig)
 
-	// 依存関係の初期化
-	bpgw := gateway.NewBpGateway(conf.BPGateway.Host, conf.BPGateway.Port, conf.BPGateway.Timeout)
-	// bpgw := gateway.NewLocalGateway(conf.BPGateway.Timeout) // ローカルGatewayを使用
+	// 依存関係の初期化: トランスポートモードに応じてゲートウェイを選択
+	var bpgw gateway2.BpGateway
+	switch conf.BPGateway.TransportMode {
+	case "bp_socket":
+		log.Printf("Using bp-socket transport (ipn:%d.%d -> ipn:%d.%d)",
+			conf.BPGateway.BpSocket.LocalNodeNum,
+			conf.BPGateway.BpSocket.LocalServiceNum,
+			conf.BPGateway.BpSocket.RemoteNodeNum,
+			conf.BPGateway.BpSocket.RemoteServiceNum)
+		var err error
+		bpgw, err = gateway.NewBpSocketGateway(
+			conf.BPGateway.BpSocket.LocalNodeNum,
+			conf.BPGateway.BpSocket.LocalServiceNum,
+			conf.BPGateway.BpSocket.RemoteNodeNum,
+			conf.BPGateway.BpSocket.RemoteServiceNum,
+			conf.BPGateway.Timeout,
+		)
+		if err != nil {
+			log.Fatalf("Failed to initialize BpSocketGateway: %v", err)
+		}
+	case "ion_cli":
+		log.Printf("Using ION CLI transport (host=%s, port=%d)", conf.BPGateway.Host, conf.BPGateway.Port)
+		bpgw = gateway.NewIonCLIGateway(conf.BPGateway.Host, conf.BPGateway.Port, conf.BPGateway.Timeout)
+	default:
+		log.Fatalf("Invalid transport mode: %s (use 'ion_cli' or 'bp_socket')", conf.BPGateway.TransportMode)
+	}
+
 	bprepo := repository.NewBpRepository(repoClient, conf.Cache.Dir)
 
 	// ============================================
