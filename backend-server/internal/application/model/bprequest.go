@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -31,11 +32,21 @@ type BpRequest struct {
 	ContentLength int64 `json:"content_length,omitempty"`
 }
 
-
-
 // ParseURL URL文字列を解析してurl.URLを返す
 func (br *BpRequest) ParseURL() (*url.URL, error) {
 	return url.Parse(br.URL)
+}
+
+// ValidateURL URLが有効かどうかを検証する（domain層のロジック）
+func (br *BpRequest) ValidateURL() error {
+	if br.URL == "" {
+		return fmt.Errorf("URL is empty")
+	}
+	_, err := url.Parse(br.URL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	return nil
 }
 
 // GetBodyReader リクエストボディをio.Readerとして返す
@@ -53,6 +64,24 @@ func (br *BpRequest) GetPath() (string, error) {
 		return "", err
 	}
 	return parsedURL.Path, nil
+}
+
+// SetHeaders HTTPリクエストにヘッダーを設定する
+func (br *BpRequest) SetHeaders(httpReq *http.Request) {
+	// ヘッダーをコピー
+	for key, values := range br.Headers {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
+	}
+
+	// Content-TypeとContent-Lengthを設定
+	if br.ContentType != "" {
+		httpReq.Header.Set("Content-Type", br.ContentType)
+	}
+	if br.ContentLength > 0 {
+		httpReq.ContentLength = br.ContentLength
+	}
 }
 
 // IsCacheable このリクエストがキャッシュ可能かどうかを判定する
@@ -154,6 +183,12 @@ func (br *BpRequest) GenerateCacheKey() string {
 	return "bp:cache:" + hex.EncodeToString(hash[:])
 }
 
+// GenerateCachePathInfo レスポンスのContentTypeからキャッシュパス情報を生成する（domain層のロジック）
+func (br *BpRequest) GenerateCachePathInfo(responseContentType string) (*CachePathInfo, error) {
+	cacheKey := br.GenerateCacheKey()
+	return GenerateCachePathInfo(br.URL, responseContentType, cacheKey)
+}
+
 // bodyReader バイト配列をio.Readerとして扱うためのヘルパー
 type bodyReader struct {
 	data []byte
@@ -167,4 +202,9 @@ func (r *bodyReader) Read(p []byte) (n int, err error) {
 	n = copy(p, r.data[r.pos:])
 	r.pos += n
 	return n, nil
+}
+
+// Close io.ReadCloserインターフェースを満たすためのダミーメソッド
+func (r *bodyReader) Close() error {
+	return nil
 }

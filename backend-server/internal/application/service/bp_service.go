@@ -1,117 +1,135 @@
 package service
 
 import (
-	"bytes"
-	"io"
+	"context"
 	"log"
 	"net/http"
+	"time"
 
-	gateway_interfaces "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/gateway/gateway_interfaces"
-	repository_interfaces "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/repository/repository_interfaces"
-	scheduler_interfaces "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/scheduler"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/gateway"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/repository"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/model"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/utils"
 )
 
 type BpService struct {
-	bpgateway    gateway_interfaces.BpGateway
-	bprepository repository_interfaces.BpRepository
-	bpscheduler  scheduler_interfaces.BpScheduler
+	bpgateway    gateway.BpGateway
+	bprepository repository.BpRepository
 }
 
 func NewBpService(
-	bpgateway gateway_interfaces.BpGateway,
-	bprepository repository_interfaces.BpRepository,
-	bpscheduler scheduler_interfaces.BpScheduler,
+	bpgateway gateway.BpGateway,
+	bprepository repository.BpRepository,
 ) *BpService {
-	return &BpService{
+	s := &BpService{
 		bpgateway:    bpgateway,
 		bprepository: bprepository,
-		bpscheduler:  bpscheduler,
 	}
+	s.StartPushListener()
+	return s
+}
+
+// StartPushListener Push受信したレスポンスを監視してキャッシュに保存する
+func (bs *BpService) StartPushListener() {
+	go func() {
+		ch := bs.bpgateway.GetUnsolicitedResponseCh()
+		for resp := range ch {
+			log.Printf("[BpService] Push受信: ステータス=%d", resp.StatusCode)
+
+			// URLを復元するロジックが必要
+			// 現在の実装では、レスポンス自体にURLが含まれていないため、
+			// リモート側がヘッダーに "X-Original-URL" を含めていることを期待する。
+			// (ユーザー提供のコードでは bpRes.Headers["X-Original-URL"] = []string{targetURL} となっている)
+
+			urls, ok := resp.Headers["X-Original-URL"]
+			if !ok || len(urls) == 0 {
+				log.Printf("[BpService] Push受信エラー: X-Original-URL ヘッダーがありません。キャッシュできません。")
+				continue
+			}
+			originalURL := urls[0]
+
+			// ダミーのBpRequestを作成（キャッシュキー生成用）
+			req := &model.BpRequest{
+				Method: "GET", // Pushは基本的にGETの結果と仮定
+				URL:    originalURL,
+			}
+
+			// キャッシュに保存
+			// TTLはデフォルト値を使用（configから取るべきだが、ここでは簡易的に24時間とする）
+			// 理想的にはConfigをServiceに注入する
+			ttl := 24 * time.Hour
+			ctx := context.Background()
+
+			err := bs.bprepository.SetResponseWithURL(ctx, req, resp, ttl)
+			if err != nil {
+				log.Printf("[BpService] Pushキャッシュ保存エラー: %v (URL=%s)", err, originalURL)
+			} else {
+				log.Printf("[BpService] Pushキャッシュ保存成功: URL=%s", originalURL)
+			}
+		}
+	}()
 }
 
 // ProxyRequest HTTPリクエストを転送する（キャッシュ可能な場合はキャッシュもチェック）
-func (bs *BpService) ProxyRequest(breq *model.BpRequest) (*model.BpResponse, error) {
+func (bs *BpService) ProxyRequest(ctx context.Context, breq *model.BpRequest) (*model.BpResponse, error) {
 	// キャッシュ不可の場合は直接転送
 	if !breq.IsCacheable() {
-		return bs.bpgateway.ProxyRequest(breq)
+		log.Printf("[BpService] リクエストはキャッシュ不可: Method=%s, URL=%s", breq.Method, breq.URL)
+		return bs.bpgateway.ProxyRequest(ctx, breq)
 	}
 
-	// キャッシュ可能な場合はキャッシュから取得を試みる
+	log.Printf("[BpService] リクエストはキャッシュ可能: URL=%s", breq.URL)
+
+	// キャッシュ可能な場合はキャッシュから取得
 	cacheKey := breq.GenerateCacheKey()
-	cachedResp, found, err := bs.bprepository.GetResponse(cacheKey)
+	cachedResp, found, err := bs.bprepository.GetResponse(ctx, cacheKey)
 	if err != nil {
+		log.Printf("[BpService] キャッシュ取得エラー: %v", err)
 		// キャッシュ取得エラー: Gateway層で直接転送
-		return bs.bpgateway.ProxyRequest(breq)
+		return bs.bpgateway.ProxyRequest(ctx, breq)
 	}
 
 	if found {
+		log.Printf("[BpService] キャッシュヒット: URL=%s", breq.URL)
 		// キャッシュヒット: キャッシュされたレスポンスを返す
 		return cachedResp, nil
 	}
 
-	// キャッシュミス: cronジョブにリクエストを予約してデフォルトページを返す
-	return bs.bpscheduler.DownloadPage(breq)
-}
+	// found == false の場合はキャッシュミス（エラーではない）
 
-// convertHTTPResponseToBpResponse HTTPレスポンスをBpResponseに変換
-func convertHTTPResponseToBpResponse(resp *http.Response) *model.BpResponse {
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	// レスポンスボディを再度読み取れるようにするため、新しいReaderを作成
-	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	log.Printf("[BpService] キャッシュミス: URL=%s, リクエストを予約します", breq.URL)
 
-	return &model.BpResponse{
-		StatusCode:    resp.StatusCode,
-		Headers:       resp.Header,
-		Body:          bodyBytes,
-		ContentType:   resp.Header.Get("Content-Type"),
-		ContentLength: resp.ContentLength,
-	}
-}
-
-// convertBpResponseToHTTPResponse BpResponseをHTTPレスポンスに変換
-func convertBpResponseToHTTPResponse(bpResp *model.BpResponse) *http.Response {
-	resp := &http.Response{
-		StatusCode: bpResp.StatusCode,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(bytes.NewReader(bpResp.Body)),
-	}
-
-	// ヘッダーをコピー
-	for key, values := range bpResp.Headers {
-		for _, value := range values {
-			resp.Header.Add(key, value)
+	// キャッシュミス: Worker Poolにリクエストを予約してデフォルトページを返す
+	if bs.bprepository != nil {
+		err := bs.bprepository.ReserveRequest(ctx, breq)
+		if err != nil {
+			log.Printf("[BpService] ReserveRequest エラー: %v", err)
+		} else {
+			log.Printf("[BpService] ReserveRequest 成功: URL=%s", breq.URL)
 		}
 	}
 
-	resp.ContentLength = bpResp.ContentLength
-	return resp
-}
-
-// createDefaultPageResponse デフォルトページ（処理中ページ）のBpResponseを作成
-// pages/default.txtからHTMLを読み込む
-func createDefaultPageResponse() *model.BpResponse {
-	// pages/default.txtからHTMLを読み込む
+	// デフォルトページを読み込む
 	htmlBytes, err := utils.LoadDefaultPage()
 	if err != nil {
-		log.Printf("Failed to load default page: %v", err)
-		// エラーが発生した場合は空のレスポンスを返す
-		htmlBytes = []byte("")
+		// デフォルトページの読み込みに失敗した場合は503 Service Unavailableを返す
+		// DTN環境では直接転送は期待できないため、フォールバックとしてエラーを返す
+		log.Printf("[BpService] Failed to load default page: %v", err)
+		body := []byte("503 Service Unavailable: Failed to load default page and direct proxy is unavailable in DTN environment.")
+		return &model.BpResponse{
+			StatusCode:    http.StatusServiceUnavailable,
+			Headers:       make(map[string][]string),
+			Body:          body,
+			ContentType:   "text/plain; charset=utf-8",
+			ContentLength: int64(len(body)),
+		}, nil
 	}
 
-	headers := make(map[string][]string)
-	headers["Content-Type"] = []string{"text/html; charset=utf-8"}
-	headers["Cache-Control"] = []string{"no-cache, no-store, must-revalidate"}
-	headers["Pragma"] = []string{"no-cache"}
-	headers["Expires"] = []string{"0"}
-
 	return &model.BpResponse{
-		StatusCode:    http.StatusOK,
-		Headers:       headers,
+		StatusCode:    200,
+		Headers:       breq.Headers,
 		Body:          htmlBytes,
 		ContentType:   "text/html; charset=utf-8",
 		ContentLength: int64(len(htmlBytes)),
-	}
+	}, nil
 }

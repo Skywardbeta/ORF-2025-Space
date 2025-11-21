@@ -1,58 +1,122 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/robfig/cron/v3"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/cmd/config"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/service"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/handlers"
-	"github.com/watanabetatsumi/backend-server/cmd/config"
-	"github.com/watanabetatsumi/backend-server/infrastructure/gateway"
-	"github.com/watanabetatsumi/backend-server/intenal/service"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/gateway"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository/plugins"
+	scheduler_worker "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/worker"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/middleware"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/middleware/module"
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/scheduler"
 )
 
 func main() {
-	r := gin.Default()
-
-	// // 1. 設定の読み込み
+	// ============================================
+	// 設定とインフラストラクチャの初期化
+	// ============================================
 	conf := config.LoadConfig()
 
-	// // 2. データベースへの接続
-	// db, err := ConnectDB()
-	// if err != nil {
-	// 	log.Fatalf("failed to connect to database: %v", err)
-	// }
-	// defer db.Close() // アプリケーション終了時にDB接続を閉じる
-
-	// 3. Cronスケジューラーの作成
-	// Cronスケジューラーの作成
-	c := cron.New(cron.WithSeconds()) // 秒単位のスケジュールを有効化
-
-	// バッチ処理の例1: 毎分実行
-	_, err := c.AddFunc("0 * * * * *", func() {
-		log.Printf("[Batch] 毎分実行されるバッチ処理: %s", time.Now().Format("2006-01-02 15:04:05"))
-		// ここに実際のバッチ処理ロジックを記述
-		// 例: データの同期、キャッシュのクリア、ログの整理など
+	// Redisクライアントの初期化
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%d", conf.RedisClient.Host, conf.RedisClient.Port),
+		Password: conf.RedisClient.Password,
+		DB:       conf.RedisClient.DB,
 	})
-	if err != nil {
-		log.Fatalf("Failed to add cron job: %v", err)
+	redisConfig := plugins.RedisClientConfig{
+		ReservedRequestsKey: conf.RedisKeys.ReservedRequestsKey,
+		CacheMetaPattern:    conf.RedisKeys.CacheMetaPattern,
 	}
+	repoClient := plugins.NewRedisClient(redisClient, redisConfig)
 
-	// プログラムを継続実行（Ctrl+Cで終了）
-	select {}
+	// 依存関係の初期化
+	bpgw := gateway.NewBpGateway(conf.BPGateway.Host, conf.BPGateway.Port, conf.BPGateway.Timeout)
+	// bpgw := gateway.NewLocalGateway(conf.BPGateway.Timeout) // ローカルGatewayを使用
+	bprepo := repository.NewBpRepository(repoClient, conf.Cache.Dir)
 
-	bpgw := gateway.NewBpGateway(
-		conf.BPGatewayHost,
-		conf.BPGatewayPort,
+	// ============================================
+	// ミドルウェアの初期化
+	// ============================================
+
+	ssl_bump_app, err := module.NewSSLBumpHandler(conf.Middlware.CertPath, conf.Middlware.KeyPath, conf.Middlware.MaxCacheSize)
+	if err != nil {
+		log.Fatalf("Failed to initialize SSLBumpHandler: %v", err)
+		return
+	}
+	middlwares := middleware.NewMiddlewarePlugins(
+		ssl_bump_app,
 	)
 
-	bpsrv := service.NewBpService(bpgw)
+	// ============================================
+	// アプリケーション層の初期化
+	// ============================================
 
-	bpHandler := handlers.NewBpHandler(bpsrv)
+	bpsrv := service.NewBpService(bpgw, bprepo)
+	bpHandler := handlers.NewBpHandler(bpsrv, middlwares)
 
-	r.GET("/bp_get/:id", bpHandler.GetContent)
+	// ============================================
+	// HTTPサーバーの設定
+	// ============================================
 
-	r.Run()
+	r := gin.Default()
+
+	// 管理用エンドポイント: 期限切れキャッシュの一括削除
+	r.POST("/system/admin/cache/cleanup", func(c *gin.Context) {
+		ctx := c.Request.Context()
+		err := bprepo.DeleteExpiredCaches(ctx)
+		if err != nil {
+			c.JSON(500, gin.H{
+				"error":   "Failed to cleanup expired cache",
+				"message": err.Error(),
+			})
+			return
+		}
+		c.JSON(200, gin.H{
+			"message": "Expired cache cleanup completed successfully",
+		})
+	})
+
+	// CONNECTメソッドを処理するミドルウェアを追加
+	// CONNECTメソッドのリクエストは、パスがhost:port形式になる可能性があるため、
+	// NoRouteの前に処理する必要がある
+	r.Use(func(c *gin.Context) {
+		if c.Request.Method == "CONNECT" {
+			bpHandler.GetContent(c)
+			c.Abort()
+			return
+		}
+		c.Next()
+	})
+
+	// すべてのHTTPメソッド（GET、POST、PUT、DELETE、PATCHなど）とパスに対応
+	// NoRouteは既存のルートにマッチしないすべてのリクエストを処理する
+	r.NoRoute(bpHandler.GetContent)
+
+	// ============================================
+	// Worker Poolの起動（非同期リクエスト処理）
+	// ============================================
+	// プラグイン可能なWorker実装を使用
+	reqHandler := scheduler_worker.NewRequestHandler(bprepo, bpgw, conf.Cache.DefaultTTL)
+	queueWatcher := scheduler_worker.NewQueueWatcher(bprepo, conf.Worker.QueueWatchTimeout)
+	cacheHandler := scheduler_worker.NewCacheHandler(bprepo)
+	processor := scheduler.NewRequestProcessor(conf.Worker.Workers, reqHandler, queueWatcher, cacheHandler, conf.Cache.CleanupInterval) // 5つのworker
+	ctx := context.Background()
+	processor.Start(ctx)
+
+	// ============================================
+	// HTTPサーバーの起動
+	// ============================================
+	log.Println("HTTPサーバーを起動します... (ポート: 8082)")
+	if err := r.Run(":8082"); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
 }
