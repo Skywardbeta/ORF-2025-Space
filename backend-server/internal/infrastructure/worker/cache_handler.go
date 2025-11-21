@@ -21,6 +21,7 @@ func (ch *CacheHandler) DeleteExpiredCaches(ctx context.Context) error {
 	return ch.bprepo.DeleteExpiredCaches(ctx)
 }
 
+// DeleteAllCaches すべてのキャッシュを削除する
 func (ch *CacheHandler) DeleteAllCaches(ctx context.Context) error {
 	return ch.bprepo.DeleteAllCaches(ctx)
 }

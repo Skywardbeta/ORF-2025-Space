@@ -27,10 +27,14 @@ func NewQueueWatcher(
 // WatchQueue キューを監視してジョブを取得する
 func (qw *QueueWatcher) WatchQueue(ctx context.Context) (*model.BpRequest, error) {
 	req, err := qw.bprepo.BLPopReservedRequest(ctx, qw.timeout)
-	if req == nil || err != nil {
+	if err != nil {
 		log.Printf("[QueueWatcher] Redisからジョブの取得に失敗: %v", err)
 
 		return nil, err
+	}
+	if req == nil {
+		// タイムアウト
+		return nil, nil
 	}
 
 	log.Printf("[QueueWatcher] Redisからジョブを取得: %s", req.URL)
