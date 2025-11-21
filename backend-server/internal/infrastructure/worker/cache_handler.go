@@ -20,3 +20,7 @@ func NewCacheHandler(bprepo repository.BpRepository) *CacheHandler {
 func (ch *CacheHandler) DeleteExpiredCaches(ctx context.Context) error {
 	return ch.bprepo.DeleteExpiredCaches(ctx)
 }
+
+func (ch *CacheHandler) DeleteAllCaches(ctx context.Context) error {
+	return ch.bprepo.DeleteAllCaches(ctx)
+}

@@ -5,23 +5,24 @@ import (
 	"log"
 	"time"
 
+	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/worker"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/model"
 )
 
 type RequestProcessor struct {
 	workers         int
 	jobQueue        chan *model.BpRequest
-	reqhandler      RequestHandler
-	queueWatcher    QueueWatcher
-	cacheHandler    CacheHandler
+	reqhandler      worker.RequestHandler
+	queueWatcher    worker.QueueWatcher
+	cacheHandler    worker.CacheHandler
 	cleanupInterval time.Duration // 追加
 }
 
 func NewRequestProcessor(
 	workers int,
-	reqhandler RequestHandler,
-	queueWatcher QueueWatcher,
-	cacheHandler CacheHandler,
+	reqhandler worker.RequestHandler,
+	queueWatcher worker.QueueWatcher,
+	cacheHandler worker.CacheHandler,
 	cleanupInterval time.Duration, // 追加
 ) *RequestProcessor {
 	return &RequestProcessor{
@@ -35,11 +36,18 @@ func NewRequestProcessor(
 }
 
 func (rp *RequestProcessor) Start(ctx context.Context) {
+	// 0. すべてのキャッシュを削除（サーバ起動時のみ）
+	if err := rp.cacheHandler.DeleteAllCaches(ctx); err != nil {
+		log.Printf("[RequestProcessor] サーバ起動時のキャッシュ削除エラー: %v", err)
+		return
+	}
+
 	// 1. Worker Poolを起動(リクエスト処理)
 	log.Printf("[RequestProcessor] Worker Poolを起動します (workers: %d)", rp.workers)
 	for i := 0; i < rp.workers; i++ {
 		go rp.worker(ctx, i)
 	}
+
 	// 2. Redisキュー監視を起動
 	go rp.watchQueue(ctx)
 	log.Printf("[RequestProcessor] Worker Poolを起動しました")

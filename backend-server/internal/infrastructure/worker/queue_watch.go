@@ -10,29 +10,30 @@ import (
 )
 
 type QueueWatcher struct {
-	bprepo       repository.BpRepository
-	timeout      time.Duration // 追加
+	bprepo  repository.BpRepository
+	timeout time.Duration // BLPopのタイムアウト時間(監視時間)
 }
 
 func NewQueueWatcher(
 	bprepo repository.BpRepository,
-	timeout time.Duration, // 追加
+	timeout time.Duration,
 ) *QueueWatcher {
 	return &QueueWatcher{
-		bprepo:       bprepo,
-		timeout:      timeout,      // 追加
+		bprepo:  bprepo,
+		timeout: timeout,
 	}
 }
 
 // WatchQueue キューを監視してジョブを取得する
 func (qw *QueueWatcher) WatchQueue(ctx context.Context) (*model.BpRequest, error) {
-	// timeout パラメータは使わず、qw.timeout を使用するように変更
 	req, err := qw.bprepo.BLPopReservedRequest(ctx, qw.timeout)
-	if err != nil {
+	if req == nil || err != nil {
+		log.Printf("[QueueWatcher] Redisからジョブの取得に失敗: %v", err)
+
 		return nil, err
 	}
-	if req != nil {
-		log.Printf("[QueueWatcher] Redisからジョブを取得: %s", req.URL)
-	}
+
+	log.Printf("[QueueWatcher] Redisからジョブを取得: %s", req.URL)
+
 	return req, nil
 }

@@ -14,10 +14,10 @@ import (
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/gateway"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository/plugins"
+	scheduler_worker "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/worker"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/middleware"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/middleware/module"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/scheduler"
-	scheduler_worker "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/scheduler/worker"
 )
 
 func main() {
@@ -32,7 +32,11 @@ func main() {
 		Password: conf.RedisClient.Password,
 		DB:       conf.RedisClient.DB,
 	})
-	repoClient := plugins.NewRedisClient(redisClient)
+	redisConfig := plugins.RedisClientConfig{
+		ReservedRequestsKey: conf.RedisKeys.ReservedRequestsKey,
+		CacheMetaPattern:    conf.RedisKeys.CacheMetaPattern,
+	}
+	repoClient := plugins.NewRedisClient(redisClient, redisConfig)
 
 	// 依存関係の初期化
 	bpgw := gateway.NewBpGateway(conf.BPGateway.Host, conf.BPGateway.Port, conf.BPGateway.Timeout)

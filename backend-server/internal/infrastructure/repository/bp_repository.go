@@ -159,6 +159,22 @@ func (br *BpRepository) DeleteExpiredCaches(ctx context.Context) error {
 	return nil
 }
 
+// DeleteAllCaches すべてのキャッシュを削除する
+func (br *BpRepository) DeleteAllCaches(ctx context.Context) error {
+	// Redisのキャッシュを全削除
+	if err := br.client.FlushAll(ctx); err != nil {
+		return err
+	}
+
+	// ファイルシステムのキャッシュも全削除
+	if err := os.RemoveAll(br.cacheDir); err != nil {
+		return err
+	}
+
+	// ディレクトリ再作成
+	return os.MkdirAll(br.cacheDir, 0755)
+}
+
 // ReserveRequest 非同期処理（Worker Pool）で処理するためにリクエストを予約する
 // Redisキューに追加して、RequestProcessorが非同期で処理する
 func (br *BpRepository) ReserveRequest(ctx context.Context, req *model.BpRequest) error {

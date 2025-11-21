@@ -24,6 +24,8 @@ type BpRepository interface {
 
 	DeleteExpiredCaches(ctx context.Context) error
 
+	DeleteAllCaches(ctx context.Context) error
+
 	// ReserveRequest 非同期処理（Worker Pool）で処理するためにリクエストを予約する
 	// Redisキューに追加して、RequestProcessorが非同期で処理する
 	// req: 予約するリクエスト

@@ -11,13 +11,20 @@ import (
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository"
 )
 
-type RedisClient struct {
-	rclient *redis.Client
+type RedisClientConfig struct {
+	ReservedRequestsKey string
+	CacheMetaPattern    string
 }
 
-func NewRedisClient(rclient *redis.Client) *RedisClient {
+type RedisClient struct {
+	rclient *redis.Client
+	config  RedisClientConfig
+}
+
+func NewRedisClient(rclient *redis.Client, config RedisClientConfig) *RedisClient {
 	return &RedisClient{
 		rclient: rclient,
+		config:  config,
 	}
 }
 
@@ -36,7 +43,7 @@ func (rc *RedisClient) ScanExpiredCacheKeys(ctx context.Context) ([]repository.C
 	// ページネーションを使用してキーをスキャン
 	var cursor uint64
 	var expiredItems []repository.CacheItem
-	pattern := "bp:cache:meta:*"
+	pattern := rc.config.CacheMetaPattern
 
 	for {
 		keys, nextCursor, err := rc.rclient.Scan(ctx, cursor, pattern, 100).Result()
@@ -108,7 +115,7 @@ func (rc *RedisClient) DeleteCache(ctx context.Context, metaKey string, filePath
 }
 
 func (rc *RedisClient) GetReservedRequests(ctx context.Context) ([][]byte, error) {
-	key := "bp:reserved:requests"
+	key := rc.config.ReservedRequestsKey
 
 	// Listの全要素を取得
 	dataList, err := rc.rclient.LRange(ctx, key, 0, -1).Result()
@@ -126,7 +133,7 @@ func (rc *RedisClient) GetReservedRequests(ctx context.Context) ([][]byte, error
 }
 
 func (rc *RedisClient) ReserveRequest(ctx context.Context, job []byte) error {
-	jobKey := "bp:reserved:requests"
+	jobKey := rc.config.ReservedRequestsKey
 	err := rc.rclient.LPush(ctx, jobKey, job).Err()
 	if err != nil {
 		return err
@@ -136,7 +143,7 @@ func (rc *RedisClient) ReserveRequest(ctx context.Context, job []byte) error {
 }
 
 func (rc *RedisClient) BLPopReservedRequest(ctx context.Context, timeout time.Duration) ([]byte, error) {
-	key := "bp:reserved:requests"
+	key := rc.config.ReservedRequestsKey
 
 	// BLPOPでブロッキング取得（タイムアウト付き）
 	result, err := rc.rclient.BLPop(ctx, timeout, key).Result()
@@ -159,11 +166,15 @@ func (rc *RedisClient) BLPopReservedRequest(ctx context.Context, timeout time.Du
 
 func (rc *RedisClient) RemoveReservedRequest(ctx context.Context, job []byte) error {
 	// Listから該当する要素を削除
-	key := "bp:reserved:requests"
+	key := rc.config.ReservedRequestsKey
 	err := rc.rclient.LRem(ctx, key, 1, job).Err()
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (rc *RedisClient) FlushAll(ctx context.Context) error {
+	return rc.rclient.FlushDB(ctx).Err()
 }
