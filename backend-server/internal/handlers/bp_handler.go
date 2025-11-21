@@ -116,6 +116,7 @@ func (bh *bpHandler) handleCONNECT(c *gin.Context) {
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		c.Abort()
 		return
 	}
 
@@ -126,13 +127,9 @@ func (bh *bpHandler) handleCONNECT(c *gin.Context) {
 	clientConn, _, err := hijacker.Hijack()
 	if err != nil {
 		http.Error(w, "Failed to hijack connection", http.StatusInternalServerError)
+		c.Abort()
 		return
 	}
-	// 注意: ここでdefer clientConn.Close()をすると、HandleConnection内で閉じられる前に接続が切れる可能性があるため、
-	// ハンドリングをミドルウェアに任せるか、エラー時のみ閉じるようにする。
-	// 今回はSSLBumpHandler.HandleConnectionが成功した場合、そちらで管理されるため、
-	// エラー時または処理完了後に適切に閉じる必要がある。
-	// ひとまずここでは、ミドルウェア呼び出し後に閉じるようにする。
 	defer clientConn.Close()
 
 	// ============================================
@@ -151,8 +148,8 @@ func (bh *bpHandler) handleCONNECT(c *gin.Context) {
 	// クライアントとのTLSハンドシェイクを行う
 	tlsConn, err := bh.middleware.SSLBumpHandler.HandleConnection(clientConn)
 	if err != nil {
-		log.Printf("[BpHandler] SSL Bump failed: %v", err)
-		return
+		// log.Printf("[BpHandler] SSL Bump failed: %v", err)
+		return // Hijack後はc.Abort()を呼ばない
 	}
 	defer tlsConn.Close() // TLS接続を閉じる
 
@@ -166,7 +163,7 @@ func (bh *bpHandler) handleCONNECT(c *gin.Context) {
 	req, err := http.ReadRequest(bufReader)
 	if err != nil {
 		log.Printf("[BpHandler] Failed to read HTTP request from TLS connection: %v", err)
-		return
+		return // Hijack後はc.Abort()を呼ばない
 	}
 
 	// リクエストボディを読み込む
@@ -175,7 +172,7 @@ func (bh *bpHandler) handleCONNECT(c *gin.Context) {
 		bodyBytes, err = io.ReadAll(req.Body)
 		if err != nil {
 			log.Printf("[BpHandler] Failed to read request body: %v", err)
-			return
+			return // Hijack後はc.Abort()を呼ばない
 		}
 		req.Body.Close()
 	}
@@ -219,9 +216,16 @@ func (bh *bpHandler) handleCONNECT(c *gin.Context) {
 			Body:       io.NopCloser(strings.NewReader("Bad Gateway")),
 		}
 		resp.Write(tlsConn)
-		return
+		return // Hijack後はc.Abort()を呼ばない
 	}
-	defer resp.GetBodyReader().(io.ReadCloser).Close()
+
+	// GetBodyReader()がnilを返す可能性を考慮
+	bodyReader := resp.GetBodyReader()
+	if bodyReader == nil {
+		bodyReader = strings.NewReader("")
+	}
+	bodyCloser := io.NopCloser(bodyReader)
+	defer bodyCloser.Close()
 
 	// レスポンスをクライアント（TLS接続）に書き込む
 	// http.Responseを構築してWriteメソッドで書き込む
@@ -230,7 +234,7 @@ func (bh *bpHandler) handleCONNECT(c *gin.Context) {
 		ProtoMajor:    1,
 		ProtoMinor:    1,
 		Header:        make(http.Header),
-		Body:          io.NopCloser(resp.GetBodyReader()),
+		Body:          bodyCloser,
 		ContentLength: resp.ContentLength,
 	}
 	// ヘッダーをコピー
@@ -243,5 +247,8 @@ func (bh *bpHandler) handleCONNECT(c *gin.Context) {
 	// レスポンスを書き込む
 	if err := httpResp.Write(tlsConn); err != nil {
 		log.Printf("[BpHandler] Failed to write response: %v", err)
+		return // Hijack後はc.Abort()を呼ばない
 	}
+
+	// Hijack後はc.Abort()を呼ばない（main.goで既に呼ばれている）
 }

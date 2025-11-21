@@ -4,15 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/cmd/config"
+	gateway_interface "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/gateway"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/service"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/handlers"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/gateway"
-	gateway2 "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/application/interface/gateway"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository"
 	"github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/repository/plugins"
 	scheduler_worker "github.com/watanabetatsumi/ORF-2025-Space/backend-server/internal/infrastructure/worker"
@@ -23,9 +24,13 @@ import (
 
 func main() {
 	// ============================================
-	// 設定とインフラストラクチャの初期化
+	// 設定の読み込み
 	// ============================================
 	conf := config.LoadConfig()
+
+	// ============================================
+	// 設定とインフラストラクチャの初期化
+	// ============================================
 
 	// Redisクライアントの初期化
 	redisClient := redis.NewClient(&redis.Options{
@@ -36,11 +41,12 @@ func main() {
 	redisConfig := plugins.RedisClientConfig{
 		ReservedRequestsKey: conf.RedisKeys.ReservedRequestsKey,
 		CacheMetaPattern:    conf.RedisKeys.CacheMetaPattern,
+		ScanCount:           conf.RedisKeys.ScanCount,
 	}
 	repoClient := plugins.NewRedisClient(redisClient, redisConfig)
 
 	// 依存関係の初期化: トランスポートモードに応じてゲートウェイを選択
-	var bpgw gateway2.BpGateway
+	var bpgw gateway_interface.BpGateway
 	switch conf.BPGateway.TransportMode {
 	case "bp_socket":
 		log.Printf("Using bp-socket transport (ipn:%d.%d -> ipn:%d.%d)",
@@ -66,6 +72,12 @@ func main() {
 		log.Fatalf("Invalid transport mode: %s (use 'ion_cli' or 'bp_socket')", conf.BPGateway.TransportMode)
 	}
 
+	// デバッグモードの場合はローカルHTTPゲートウェイを使用
+	if conf.Server.Mode == config.DebugMode {
+		log.Println("Debug mode enabled: Using Local HTTP Gateway")
+		bpgw = gateway.NewLocalGateway(conf.BPGateway.Timeout)
+	}
+
 	bprepo := repository.NewBpRepository(repoClient, conf.Cache.Dir)
 
 	// ============================================
@@ -85,19 +97,45 @@ func main() {
 	// アプリケーション層の初期化
 	// ============================================
 
-	bpsrv := service.NewBpService(bpgw, bprepo)
+	bpsrv := service.NewBpService(bpgw, bprepo, conf.Server.DefaultDir, conf.Server.DefaultFileName)
 	bpHandler := handlers.NewBpHandler(bpsrv, middlwares)
 
 	// ============================================
-	// HTTPサーバーの設定
+	// サーバーのセットアップ
 	// ============================================
 
-	r := gin.Default()
+	// gin.Default() の代わりに gin.New() を使用してカスタムロガーを設定
+	r := gin.New()
+	r.Use(gin.Recovery())
 
-	// 管理用エンドポイント: 期限切れキャッシュの一括削除
+	// セキュリティヘッダーを追加するミドルウェア
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		c.Next()
+	})
+
+	// カスタム Logger: CONNECT メソッドの場合はログを出力しない
+	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		if param.Request.Method == http.MethodConnect {
+			// CONNECT のログは捨てる
+			return ""
+		}
+
+		// それ以外はデフォルトとほぼ同じ形式で出す
+		return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s  %s\n",
+			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+			param.StatusCode,
+			param.Latency,
+			param.ClientIP,
+			param.Method,
+			param.Path,
+		)
+	}))
+
+	// 管理用エンドポイント: キャッシュの一括削除
 	r.POST("/system/admin/cache/cleanup", func(c *gin.Context) {
 		ctx := c.Request.Context()
-		err := bprepo.DeleteExpiredCaches(ctx)
+		err := bprepo.DeleteAllCaches(ctx)
 		if err != nil {
 			c.JSON(500, gin.H{
 				"error":   "Failed to cleanup expired cache",
@@ -140,8 +178,9 @@ func main() {
 	// ============================================
 	// HTTPサーバーの起動
 	// ============================================
-	log.Println("HTTPサーバーを起動します... (ポート: 8082)")
-	if err := r.Run(":8082"); err != nil {
+	addr := fmt.Sprintf(":%d", conf.Server.Port)
+	log.Printf("HTTPサーバーを起動します... (ポート: %d)", conf.Server.Port)
+	if err := r.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }

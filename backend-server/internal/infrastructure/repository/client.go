@@ -11,13 +11,15 @@ type CacheItem struct {
 }
 
 type BpRepoClient interface {
-	GetMetaData(ctx context.Context, key string) ([]byte, error)
-	ScanExpiredCacheKeys(ctx context.Context) ([]CacheItem, error)
-	SetMetaData(ctx context.Context, key string, data []byte, ttl time.Duration) error
-	DeleteCache(ctx context.Context, metaKey string, filePath string) error
+	GetMetaData(ctx context.Context, metaKey string) ([]byte, error)
+	ScanExpiredKeys(ctx context.Context) ([]CacheItem, error)
+	SetMetaData(ctx context.Context, metaKey string, data []byte, ttl time.Duration) error
+	DeleteMetaData(ctx context.Context, metaKey string) error
+	FlushAllMetaData(ctx context.Context) error
 	ReserveRequest(ctx context.Context, job []byte) error
 	GetReservedRequests(ctx context.Context) ([][]byte, error)
 	RemoveReservedRequest(ctx context.Context, job []byte) error
 	BLPopReservedRequest(ctx context.Context, timeout time.Duration) ([]byte, error)
-	FlushAll(ctx context.Context) error
+	FlushAllReservedRequest(ctx context.Context) error
+	FlushAllCaches(ctx context.Context) error
 }
