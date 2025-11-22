@@ -41,6 +41,7 @@ func LoadConfig() Config {
 		},
 		RedisKeys: RedisKeys{
 			ReservedRequestsKey: "bp:reserved:requests",
+			PendingRequestsKey:  "bp:pending:requests",
 			CacheMetaPattern:    "bp:cache:meta:*",
 			// ScanCount は省略可能（デフォルト値100が使用される）
 			// ScanCount:           100,
@@ -116,6 +117,7 @@ type yamlConfig struct {
 	} `yaml:"redis_client"`
 	RedisKeys struct {
 		ReservedRequestsKey string `yaml:"reserved_requests_key"`
+		PendingRequestsKey  string `yaml:"pending_requests_key"`
 		CacheMetaPattern    string `yaml:"cache_meta_pattern"`
 		ScanCount           int    `yaml:"scan_count"`
 	} `yaml:"redis_keys"`
@@ -260,6 +262,9 @@ func mergeConfig(defaultConfig, yamlConfig Config) Config {
 	// RedisKeys
 	if yamlConfig.RedisKeys.ReservedRequestsKey != "" {
 		merged.RedisKeys.ReservedRequestsKey = yamlConfig.RedisKeys.ReservedRequestsKey
+	}
+	if yamlConfig.RedisKeys.PendingRequestsKey != "" {
+		merged.RedisKeys.PendingRequestsKey = yamlConfig.RedisKeys.PendingRequestsKey
 	}
 	if yamlConfig.RedisKeys.CacheMetaPattern != "" {
 		merged.RedisKeys.CacheMetaPattern = yamlConfig.RedisKeys.CacheMetaPattern

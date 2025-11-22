@@ -30,6 +30,7 @@ type Redis struct {
 type RedisKeys struct {
 	// Redis内で使用するキーのパターン
 	ReservedRequestsKey string `yaml:"reserved_requests_key"`
+	PendingRequestsKey  string `yaml:"pending_requests_key"`
 	CacheMetaPattern    string `yaml:"cache_meta_pattern"`
 	ScanCount           int    `yaml:"scan_count"` // Redis SCANコマンドのCOUNTパラメータ
 }

@@ -26,3 +26,8 @@ type CacheHandler interface {
 	// DeleteAllCaches すべてのキャッシュを削除する
 	DeleteAllCaches(ctx context.Context) error
 }
+
+// ResponseWatcher Unsolicited Responseを監視するワーカー
+type ResponseWatcher interface {
+	Start(ctx context.Context)
+}

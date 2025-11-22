@@ -268,3 +268,13 @@ func (br *BpRepository) BLPopReservedRequest(ctx context.Context, timeout time.D
 
 	return &req, nil
 }
+
+// AddPendingRequest 処理中のリクエストとしてマークする
+func (br *BpRepository) AddPendingRequest(ctx context.Context, url string) (bool, error) {
+	return br.client.AddPendingRequest(ctx, url)
+}
+
+// RemovePendingRequest 処理中のリクエストマークを削除する
+func (br *BpRepository) RemovePendingRequest(ctx context.Context, url string) error {
+	return br.client.RemovePendingRequest(ctx, url)
+}

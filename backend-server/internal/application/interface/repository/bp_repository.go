@@ -43,4 +43,11 @@ type BpRepository interface {
 	// timeout: タイムアウト時間（0の場合は無期限に待機）
 	// 戻り値: 取得したリクエスト（タイムアウトの場合はnil）
 	BLPopReservedRequest(ctx context.Context, timeout time.Duration) (*model.BpRequest, error)
+
+	// AddPendingRequest 処理中のリクエストとしてマークする
+	// 戻り値: 新規に追加された場合はtrue、既に存在した場合はfalse
+	AddPendingRequest(ctx context.Context, url string) (bool, error)
+
+	// RemovePendingRequest 処理中のリクエストマークを削除する
+	RemovePendingRequest(ctx context.Context, url string) error
 }

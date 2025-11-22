@@ -15,7 +15,8 @@ type RequestProcessor struct {
 	reqhandler      worker.RequestHandler
 	queueWatcher    worker.QueueWatcher
 	cacheHandler    worker.CacheHandler
-	cleanupInterval time.Duration // 追加
+	responseWatcher worker.ResponseWatcher // 修正: ポインタではなくインターフェース
+	cleanupInterval time.Duration
 }
 
 func NewRequestProcessor(
@@ -23,7 +24,8 @@ func NewRequestProcessor(
 	reqhandler worker.RequestHandler,
 	queueWatcher worker.QueueWatcher,
 	cacheHandler worker.CacheHandler,
-	cleanupInterval time.Duration, // 追加
+	responseWatcher worker.ResponseWatcher, // 修正: ポインタではなくインターフェース
+	cleanupInterval time.Duration,
 ) *RequestProcessor {
 	return &RequestProcessor{
 		workers:         workers,
@@ -31,7 +33,8 @@ func NewRequestProcessor(
 		reqhandler:      reqhandler,
 		queueWatcher:    queueWatcher,
 		cacheHandler:    cacheHandler,
-		cleanupInterval: cleanupInterval, // 追加
+		responseWatcher: responseWatcher,
+		cleanupInterval: cleanupInterval,
 	}
 }
 
@@ -55,6 +58,10 @@ func (rp *RequestProcessor) Start(ctx context.Context) {
 	// 3. キャッシュクリーンアップcronを起動
 	go rp.startCacheCleanup(ctx)
 	log.Printf("[RequestProcessor] キャッシュクリーンアップを起動しました")
+
+	// 4. ResponseWatcherを起動
+	go rp.responseWatcher.Start(ctx)
+	log.Printf("[RequestProcessor] ResponseWatcherを起動しました")
 }
 
 func (rp *RequestProcessor) worker(ctx context.Context, id int) {

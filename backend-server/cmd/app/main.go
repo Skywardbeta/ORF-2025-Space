@@ -171,7 +171,8 @@ func main() {
 	reqHandler := scheduler_worker.NewRequestHandler(bprepo, bpgw, conf.Cache.DefaultTTL)
 	queueWatcher := scheduler_worker.NewQueueWatcher(bprepo, conf.Worker.QueueWatchTimeout)
 	cacheHandler := scheduler_worker.NewCacheHandler(bprepo)
-	processor := scheduler.NewRequestProcessor(conf.Worker.Workers, reqHandler, queueWatcher, cacheHandler, conf.Cache.CleanupInterval) // 5つのworker
+	responseWatcher := scheduler_worker.NewResponseWatcher(bpgw, bprepo)
+	processor := scheduler.NewRequestProcessor(conf.Worker.Workers, reqHandler, queueWatcher, cacheHandler, responseWatcher, conf.Cache.CleanupInterval) // 5つのworker
 	ctx := context.Background()
 	processor.Start(ctx)
 

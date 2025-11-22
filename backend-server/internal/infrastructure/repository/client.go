@@ -20,6 +20,8 @@ type BpRepoClient interface {
 	GetReservedRequests(ctx context.Context) ([][]byte, error)
 	RemoveReservedRequest(ctx context.Context, job []byte) error
 	BLPopReservedRequest(ctx context.Context, timeout time.Duration) ([]byte, error)
+	AddPendingRequest(ctx context.Context, url string) (bool, error)
+	RemovePendingRequest(ctx context.Context, url string) error
 	FlushAllReservedRequest(ctx context.Context) error
 	FlushAllCaches(ctx context.Context) error
 }

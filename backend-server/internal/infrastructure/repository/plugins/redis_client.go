@@ -12,6 +12,7 @@ import (
 
 type RedisClientConfig struct {
 	ReservedRequestsKey string
+	PendingRequestsKey  string // 追加
 	CacheMetaPattern    string
 	ScanCount           int
 }
@@ -229,4 +230,19 @@ func (rc *RedisClient) FlushAllCaches(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (rc *RedisClient) AddPendingRequest(ctx context.Context, url string) (bool, error) {
+	key := rc.config.PendingRequestsKey
+	// SAdd returns the number of elements added. If 1, it's new. If 0, it already existed.
+	added, err := rc.rclient.SAdd(ctx, key, url).Result()
+	if err != nil {
+		return false, err
+	}
+	return added > 0, nil
+}
+
+func (rc *RedisClient) RemovePendingRequest(ctx context.Context, url string) error {
+	key := rc.config.PendingRequestsKey
+	return rc.rclient.SRem(ctx, key, url).Err()
 }

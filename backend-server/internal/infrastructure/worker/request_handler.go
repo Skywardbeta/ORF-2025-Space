@@ -87,6 +87,9 @@ func (rh *RequestHandler) HandleRequest(ctx context.Context, req *model.BpReques
 }
 
 func (rh *RequestHandler) _removeReservedRequest(ctx context.Context, req *model.BpRequest, workerID int) error {
+	// Pending状態を解除
+	_ = rh.bprepo.RemovePendingRequest(ctx, req.URL)
+
 	err := rh.bprepo.RemoveReservedRequest(ctx, req)
 	if err != nil {
 		log.Printf("[Worker %d] 予約の削除に失敗 (URL: %s): %v", workerID, req.URL, err)
