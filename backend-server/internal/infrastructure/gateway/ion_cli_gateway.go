@@ -114,7 +114,10 @@ func (g *IonCLIGateway) ProxyRequest(ctx context.Context, breq *model.BpRequest)
 
 	respCh := make(chan *DTNJsonResponse, 1)
 	g.responseChs.Store(reqID, respCh)
-	defer g.responseChs.Delete(reqID)
+	defer func() {
+		g.responseChs.Delete(reqID)
+		close(respCh) // sendBundleでエラーが発生した場合でもチャネルを閉じる
+	}()
 
 	if err := g.sendBundle(reqID, breq); err != nil {
 		return nil, fmt.Errorf("bundle送信失敗: %w", err)
