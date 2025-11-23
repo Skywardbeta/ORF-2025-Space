@@ -1,0 +1,51 @@
+# BPゲートウェイの接続情報
+bp_gateway:
+  transport_mode: "bp_socket" # "ion_cli" or "bp_socket"
+  host: "localhost"
+  port: 8081
+  timeout: "5s"
+  bp_socket:
+    local_node_num: 149
+    local_service_num: 1
+    remote_node_num: 150
+    remote_service_num: 1
+
+# Redisサーバーの接続情報
+redis_client:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+
+# Redis内で使用するキーのパターン
+redis_keys:
+  reserved_requests_key: "bp:reserved:requests"
+  cache_meta_pattern: "bp:cache:meta:*"
+  scan_count: 100  # 省略可能（デフォルト値100が使用される）
+
+# キャッシュ設定
+cache:
+  dir: "./tmp/bp_cache"
+  default_ttl: "24h"
+  cleanup_interval: "5m"
+
+# Worker設定
+worker:
+  workers: 10
+  queue_watch_timeout: "10s"
+
+# ミドルウェア設定
+middleware:
+  cert_path: "./my_crt/bump.crt"
+  key_path: "./my_crt/bump.key"
+  max_cache_size: 20
+  rsa_bits: 2048
+  cache_duration: 24
+
+# サーバー設定
+server:
+  port: 8082
+  mode: "debug"  # "debug" または "production"
+  default_dir: "pages"           # デフォルトページとプレースホルダーファイルのディレクトリ
+  default_file_name: "default.txt"  # デフォルトHTMLファイル名
+

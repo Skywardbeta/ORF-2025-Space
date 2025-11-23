@@ -53,3 +53,8 @@ func (g *LocalGateway) ProxyRequest(ctx context.Context, breq *model.BpRequest) 
 		ContentLength: httpResp.ContentLength,
 	}, nil
 }
+
+func (g *LocalGateway) GetUnsolicitedResponseCh() <-chan *model.BpResponse {
+	// LocalGatewayではPush受信をサポートしないため、nilチャンネルを返す
+	return nil
+}

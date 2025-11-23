@@ -53,7 +53,9 @@ func (br *BpRepository) GetResponse(ctx context.Context, cacheKey string) (*mode
 	// 有効期限チェック
 	if metadata.IsExpired() {
 		// TTLが切れている場合は削除
-		_ = br.client.DeleteCache(ctx, cacheKey, metadata.FilePath)
+		_ = os.Remove(metadata.FilePath)
+		metaKey := _getMetaKey(cacheKey)
+		_ = br.client.DeleteMetaData(ctx, metaKey)
 		return nil, false, nil
 	}
 
@@ -62,7 +64,8 @@ func (br *BpRepository) GetResponse(ctx context.Context, cacheKey string) (*mode
 	if err != nil {
 		// ファイルが存在しない場合はRedisからも削除（アクセス時のクリア）
 		if os.IsNotExist(err) {
-			_ = br.client.DeleteCache(ctx, cacheKey, metadata.FilePath)
+			metaKey := _getMetaKey(cacheKey)
+			_ = br.client.DeleteMetaData(ctx, metaKey)
 		}
 		return nil, false, nil
 	}
@@ -146,14 +149,19 @@ func _getMetaKey(cacheKey string) string {
 
 // DeleteExpiredCaches 期限切れキャッシュを削除する
 func (br *BpRepository) DeleteExpiredCaches(ctx context.Context) error {
-	items, err := br.client.ScanExpiredCacheKeys(ctx)
+	items, err := br.client.ScanExpiredKeys(ctx)
 	if err != nil {
 		return err
 	}
 
 	// 各期限切れアイテムを削除
 	for _, item := range items {
-		_ = br.client.DeleteCache(ctx, item.Key, item.FilePath)
+		// ファイルシステムから削除
+		if item.FilePath != "" {
+			_ = os.Remove(item.FilePath)
+		}
+		// Redisからメタデータを削除
+		_ = br.client.DeleteMetaData(ctx, item.Key)
 	}
 
 	return nil
@@ -162,7 +170,7 @@ func (br *BpRepository) DeleteExpiredCaches(ctx context.Context) error {
 // DeleteAllCaches すべてのキャッシュを削除する
 func (br *BpRepository) DeleteAllCaches(ctx context.Context) error {
 	// Redisのキャッシュを全削除
-	if err := br.client.FlushAll(ctx); err != nil {
+	if err := br.client.FlushAllCaches(ctx); err != nil {
 		return err
 	}
 
@@ -259,4 +267,14 @@ func (br *BpRepository) BLPopReservedRequest(ctx context.Context, timeout time.D
 	}
 
 	return &req, nil
+}
+
+// AddPendingRequest 処理中のリクエストとしてマークする
+func (br *BpRepository) AddPendingRequest(ctx context.Context, url string) (bool, error) {
+	return br.client.AddPendingRequest(ctx, url)
+}
+
+// RemovePendingRequest 処理中のリクエストマークを削除する
+func (br *BpRepository) RemovePendingRequest(ctx context.Context, url string) error {
+	return br.client.RemovePendingRequest(ctx, url)
 }

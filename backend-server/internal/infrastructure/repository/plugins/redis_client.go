@@ -3,7 +3,6 @@ package plugins
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -13,7 +12,9 @@ import (
 
 type RedisClientConfig struct {
 	ReservedRequestsKey string
+	PendingRequestsKey  string // 追加
 	CacheMetaPattern    string
+	ScanCount           int
 }
 
 type RedisClient struct {
@@ -28,8 +29,8 @@ func NewRedisClient(rclient *redis.Client, config RedisClientConfig) *RedisClien
 	}
 }
 
-func (rc *RedisClient) GetMetaData(ctx context.Context, key string) ([]byte, error) {
-	metaData, err := rc.rclient.Get(ctx, key).Bytes()
+func (rc *RedisClient) GetMetaData(ctx context.Context, metaKey string) ([]byte, error) {
+	metaData, err := rc.rclient.Get(ctx, metaKey).Bytes()
 	if err == redis.Nil {
 		return nil, nil
 	} else if err != nil {
@@ -39,14 +40,20 @@ func (rc *RedisClient) GetMetaData(ctx context.Context, key string) ([]byte, err
 	return metaData, nil
 }
 
-func (rc *RedisClient) ScanExpiredCacheKeys(ctx context.Context) ([]repository.CacheItem, error) {
+func (rc *RedisClient) ScanExpiredKeys(ctx context.Context) ([]repository.CacheItem, error) {
 	// ページネーションを使用してキーをスキャン
 	var cursor uint64
 	var expiredItems []repository.CacheItem
 	pattern := rc.config.CacheMetaPattern
 
+	// ScanCountが0の場合はデフォルト値100を使用
+	scanCount := rc.config.ScanCount
+	if scanCount == 0 {
+		scanCount = 100
+	}
+
 	for {
-		keys, nextCursor, err := rc.rclient.Scan(ctx, cursor, pattern, 100).Result()
+		keys, nextCursor, err := rc.rclient.Scan(ctx, cursor, pattern, int64(scanCount)).Result()
 		if err != nil {
 			return nil, err
 		}
@@ -91,24 +98,50 @@ func (rc *RedisClient) ScanExpiredCacheKeys(ctx context.Context) ([]repository.C
 	return expiredItems, nil
 }
 
-func (rc *RedisClient) SetMetaData(ctx context.Context, key string, data []byte, ttl time.Duration) error {
-	err := rc.rclient.Set(ctx, key, data, ttl).Err()
+func (rc *RedisClient) SetMetaData(ctx context.Context, metaKey string, data []byte, ttl time.Duration) error {
+	err := rc.rclient.Set(ctx, metaKey, data, ttl).Err()
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (rc *RedisClient) DeleteCache(ctx context.Context, metaKey string, filePath string) error {
+func (rc *RedisClient) DeleteMetaData(ctx context.Context, metaKey string) error {
 	// Redisからメタデータを削除
 	if err := rc.rclient.Del(ctx, metaKey).Err(); err != nil {
 		return err
 	}
+	return nil
+}
 
-	// ファイルシステムからキャッシュファイルを削除
-	// ファイルが存在しない場合はエラーを返さない（既に削除済みとみなす）
-	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
-		return err
+func (rc *RedisClient) FlushAllMetaData(ctx context.Context) error {
+	// 1. Redis上の関連キーを削除
+	// メタデータをスキャンして削除
+	var cursor uint64
+	pattern := rc.config.CacheMetaPattern
+
+	// ScanCountが0の場合はデフォルト値100を使用
+	scanCount := rc.config.ScanCount
+	if scanCount == 0 {
+		scanCount = 100
+	}
+
+	for {
+		keys, nextCursor, err := rc.rclient.Scan(ctx, cursor, pattern, int64(scanCount)).Result()
+		if err != nil {
+			return err
+		}
+
+		if len(keys) > 0 {
+			if err := rc.rclient.Del(ctx, keys...).Err(); err != nil {
+				return err
+			}
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
 	}
 
 	return nil
@@ -175,6 +208,41 @@ func (rc *RedisClient) RemoveReservedRequest(ctx context.Context, job []byte) er
 	return nil
 }
 
-func (rc *RedisClient) FlushAll(ctx context.Context) error {
-	return rc.rclient.FlushDB(ctx).Err()
+func (rc *RedisClient) FlushAllReservedRequest(ctx context.Context) error {
+	// 予約済みリクエストのキューを削除
+	err := rc.rclient.Del(ctx, rc.config.ReservedRequestsKey).Err()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (rc *RedisClient) FlushAllCaches(ctx context.Context) error {
+	// Redis上の関連キーをすべて削除
+	err := rc.FlushAllMetaData(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = rc.FlushAllReservedRequest(ctx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (rc *RedisClient) AddPendingRequest(ctx context.Context, url string) (bool, error) {
+	key := rc.config.PendingRequestsKey
+	// SAdd returns the number of elements added. If 1, it's new. If 0, it already existed.
+	added, err := rc.rclient.SAdd(ctx, key, url).Result()
+	if err != nil {
+		return false, err
+	}
+	return added > 0, nil
+}
+
+func (rc *RedisClient) RemovePendingRequest(ctx context.Context, url string) error {
+	key := rc.config.PendingRequestsKey
+	return rc.rclient.SRem(ctx, key, url).Err()
 }

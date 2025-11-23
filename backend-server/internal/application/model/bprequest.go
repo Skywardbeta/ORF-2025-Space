@@ -101,16 +101,16 @@ func (br *BpRequest) IsCacheable() bool {
 	// ここでは、認証ヘッダーがある場合はキャッシュ可能とする（キーに含める）
 
 	// Cookieにセッション情報がある場合は、動的コンテンツの可能性が高いためキャッシュしない
-	if cookies, ok := br.Headers["Cookie"]; ok {
-		for _, cookie := range cookies {
-			// セッションIDや認証情報を含むCookieがある場合はキャッシュしない
-			if strings.Contains(strings.ToLower(cookie), "session") ||
-				strings.Contains(strings.ToLower(cookie), "auth") ||
-				strings.Contains(strings.ToLower(cookie), "token") {
-				return false
-			}
-		}
-	}
+	// if cookies, ok := br.Headers["Cookie"]; ok {
+	// 	for _, cookie := range cookies {
+	// 		// セッションIDや認証情報を含むCookieがある場合はキャッシュしない
+	// 		if strings.Contains(strings.ToLower(cookie), "session") ||
+	// 			strings.Contains(strings.ToLower(cookie), "auth") ||
+	// 			strings.Contains(strings.ToLower(cookie), "token") {
+	// 			return false
+	// 		}
+	// 	}
+	// }
 
 	return true
 }
@@ -147,22 +147,11 @@ func (br *BpRequest) GenerateCacheKey() string {
 	// 重要なヘッダーをソートして追加
 	var headerParts []string
 
-	// 認証情報がある場合は、ユーザーごとにキャッシュを分けるために含める
-	if br.IsUserSpecific() {
-		if auth, ok := br.Headers["Authorization"]; ok {
-			headerParts = append(headerParts, fmt.Sprintf("auth:%s", strings.Join(auth, ",")))
-		}
-		if cookies, ok := br.Headers["Cookie"]; ok {
-			// Cookieから認証関連の情報のみを抽出
-			for _, cookie := range cookies {
-				if strings.Contains(strings.ToLower(cookie), "session") ||
-					strings.Contains(strings.ToLower(cookie), "auth") ||
-					strings.Contains(strings.ToLower(cookie), "token") {
-					headerParts = append(headerParts, fmt.Sprintf("cookie:%s", cookie))
-				}
-			}
-		}
-	}
+	// Authorizationヘッダーがある場合は、ユーザーごとにキャッシュを分けるために含める
+	// Cookieにsession/auth/tokenがある場合はIsCacheable()がfalseになるため、ここには到達しない
+	// if auth, ok := br.Headers["Authorization"]; ok {
+	// 	headerParts = append(headerParts, fmt.Sprintf("auth:%s", strings.Join(auth, ",")))
+	// }
 
 	// その他の重要なヘッダー
 	importantHeaders := []string{"Accept", "Accept-Language"}
