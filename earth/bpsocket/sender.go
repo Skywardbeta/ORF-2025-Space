@@ -1,4 +1,4 @@
-// sender.go - BP Socket送信ゲートウェイ
+// Package bpsocket provides bundle transmission via BP Socket
 package bpsocket
 
 import (
@@ -9,14 +9,13 @@ import (
 	"runtime"
 )
 
-// BpSender BP Socketでバンドルを送信する
+// BpSender handles bundle transmission to a remote BP Socket endpoint
 type BpSender struct {
 	socket        *BpSocket
 	remoteNodeNum uint64
 	remoteSvcNum  uint64
 }
 
-// NewBpSender 送信専用のBP Socketを作成
 func NewBpSender(localNodeNum, localSvcNum, remoteNodeNum, remoteSvcNum uint64) (*BpSender, error) {
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("bp-socket is only supported on Linux (current OS: %s)", runtime.GOOS)
@@ -37,7 +36,6 @@ func NewBpSender(localNodeNum, localSvcNum, remoteNodeNum, remoteSvcNum uint64) 
 	}, nil
 }
 
-// Send バンドルを送信
 func (s *BpSender) Send(ctx context.Context, data interface{}) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -58,7 +56,6 @@ func (s *BpSender) Send(ctx context.Context, data interface{}) error {
 	return nil
 }
 
-// Close ソケットをクローズ
 func (s *BpSender) Close() error {
 	return s.socket.Close()
 }

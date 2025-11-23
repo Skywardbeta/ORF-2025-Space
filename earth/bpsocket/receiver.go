@@ -1,4 +1,4 @@
-// receiver.go - BP Socket連続受信ゲートウェイ
+// Package bpsocket provides continuous bundle reception via BP Socket
 package bpsocket
 
 import (
@@ -10,14 +10,13 @@ import (
 
 const maxBundleSize = 4 * 1024 * 1024
 
-// BpReceiver BP Socketで連続的にバンドルを受信する
+// BpReceiver handles continuous bundle reception from BP Socket
 type BpReceiver struct {
 	socket   *BpSocket
 	dataChan chan []byte
 	stopChan chan struct{}
 }
 
-// NewBpReceiver 受信専用のBP Socketを作成
 func NewBpReceiver(localNodeNum, localSvcNum uint64) (*BpReceiver, error) {
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("bp-socket is only supported on Linux (current OS: %s)", runtime.GOOS)
@@ -37,17 +36,14 @@ func NewBpReceiver(localNodeNum, localSvcNum uint64) (*BpReceiver, error) {
 	}, nil
 }
 
-// Start 受信ループを開始
 func (r *BpReceiver) Start() {
 	go r.receiveLoop()
 }
 
-// GetDataChannel 受信データを取得するチャネル
 func (r *BpReceiver) GetDataChannel() <-chan []byte {
 	return r.dataChan
 }
 
-// Close ソケットをクローズして受信を停止
 func (r *BpReceiver) Close() error {
 	close(r.stopChan)
 	return r.socket.Close()
@@ -82,7 +78,6 @@ func (r *BpReceiver) receiveLoop() {
 
 		log.Printf("[BpReceiver] Received %d bytes from %s", n, fromAddr.String())
 
-		// データをコピーしてチャネルに送信
 		data := make([]byte, n)
 		copy(data, buf[:n])
 
@@ -95,7 +90,6 @@ func (r *BpReceiver) receiveLoop() {
 	}
 }
 
-// ParseDTNRequest バンドルペイロードからDTNJsonRequestをパース
 func ParseDTNRequest(data []byte) (url string, reqID string, err error) {
 	var req struct {
 		RequestID string `json:"request_id"`

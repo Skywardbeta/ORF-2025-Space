@@ -1,7 +1,7 @@
 //go:build linux
 // +build linux
 
-// syscall_linux.go - Linux環境でのAF_BPソケットシステムコール実装
+// Package bpsocket provides Linux-specific syscall implementations for BP Socket
 package bpsocket
 
 import (

@@ -58,8 +58,8 @@ func main() {
 	// BP Socket設定
 	const (
 		localNodeNum   = 150 // Earth node
-		localSvcNum    = 1   // Receive on ipn:150.1
-		sendFromSvcNum = 2   // Send from ipn:150.2
+		localSvcNum    = 3   // Receive on ipn:150.3 (避開1, 2 which might be used by ION)
+		sendFromSvcNum = 4   // Send from ipn:150.4
 		remoteNodeNum  = 149 // Space node
 		remoteSvcNum   = 1   // Send to ipn:149.1
 	)

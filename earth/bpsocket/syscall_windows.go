@@ -1,7 +1,7 @@
 //go:build windows
 // +build windows
 
-// syscall_windows.go - Windows環境用スタブ（bp-socketはサポートしてない）
+// Package bpsocket provides Windows stubs (BP Socket not supported on Windows)
 package bpsocket
 
 import (

@@ -30,7 +30,7 @@ func LoadConfig() Config {
 				LocalNodeNum:     149,
 				LocalServiceNum:  1,
 				RemoteNodeNum:    150,
-				RemoteServiceNum: 1,
+				RemoteServiceNum: 3, // Changed from 1 to 3 to avoid ION conflicts
 			},
 		},
 		RedisClient: Redis{

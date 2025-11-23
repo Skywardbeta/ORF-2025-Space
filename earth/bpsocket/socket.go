@@ -1,4 +1,4 @@
-// socket.go - AF_BPソケットの基本操作（作成、送受信、クローズ）
+// Package bpsocket provides low-level BP Socket operations
 package bpsocket
 
 import (
@@ -58,4 +58,3 @@ func (s *BpSocket) Close() error {
 func (s *BpSocket) LocalAddr() *SockaddrBP {
 	return s.localAddr
 }
-
